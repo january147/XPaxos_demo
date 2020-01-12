@@ -52,11 +52,11 @@ class Replica():
         self.prepare_log = []
         self.commit_log = []
         self.vcset = []
-        self.susset = []
         self.view = 0
         self.sn = -1
         self.ex = -1
         self.view_changing = False
+        self.replicate_ok = True
         # replica state
         self.data = 0
         # lock
@@ -117,17 +117,15 @@ class Replica():
         self.new_view_received = set()
         self.view_changing = True
         self.replicate_ok = False
-        self.view += 1
-        self.primary, self.follower = self.get_sync_group(self.view)
     
     def broadcast(self, data, des = None):
         if des == None:
-            des = addresses
+            des = addresses[1:]
         for address in des:
             if address != self.address:
                 self.sk.sendto(data, address)
     
-    def get_sync_group(self, view):
+    def get_sync_group_address(self, view):
         choose = view % 3
         if choose == 0:
             sg = [addresses[1], addresses[2]]
@@ -136,6 +134,16 @@ class Replica():
         else:
             sg = [addresses[3], addresses[1]]
         return sg
+    
+    def get_sync_group(self, view):
+        choose = view % 3
+        if choose == 0:
+            sg = [1, 2]
+        elif choose == 1:
+            sg = [2, 3]
+        else:
+            sg = [3, 1]
+        return sg
 
     def suspect(self):
         self.view_change_init()
@@ -143,15 +151,30 @@ class Replica():
         suspect_msg.append(self.sign(suspect_msg))
         packed_suspect_msg = pickle.dumps(suspect_msg)
         self.broadcast(packed_suspect_msg)
+        self.view_change()
+        
+    def view_change(self):
+        self.view += 1
+        self.primary, self.follower = self.get_sync_group(self.view)
         # send view change
         vc_msg = [MsgType.VIEW_CHANGE, self.view, self.commit_log[:self.sn + 1]]
         vc_msg.append(self.sign(vc_msg))
         packed_vc_msg = pickle.dumps(vc_msg)
-        self.broadcast(packed_vc_msg, self.get_sync_group(self.view))
+        self.broadcast(packed_vc_msg, self.get_sync_group_address(self.view))
         # 自身的view-change消息加入vcset中
         self.vcset.append(vc_msg)
         # todo start a timer
-        
+
+    def format_commit_log(self):
+        result = ""
+        for item in self.commit_log:
+            req, msg_p, msg_f = item
+            sn = msg_p[2]
+            op = req[1]
+            format_item = "sn:{:d}, op:{:+d}\n".format(sn, op)
+            result += format_item
+        return result
+
         
     def msg_handler(self, msg, sender):
         msg_type = msg[0]
@@ -179,7 +202,6 @@ class Replica():
                 self.prepare_log.append([req, msg_p])
             else:
                 self.prepare_log[self.sn] = [req, msg_p]
-            import pdb; pdb.set_trace()
             self.sk.sendto(pickle.dumps(msg_to_follower), addresses[self.follower])
         # primary asks to commit
         elif msg_type == MsgType.COMMIT_REQUEST:
@@ -246,12 +268,22 @@ class Replica():
                 print("start view change")
                 return
             view = msg[1]
-            if view != self.view:
+            if view < self.view - 1:
                 # 会收到多个来自上个view的suspect消息，忽略这些消息，如果收到更前的view的suspect消息或者之后view的suspec消息则予以警告
-                if view <= self.view - 2 or view > self.view:
-                    print("wrong view in suspect message from %d"%(sender))
+                print("obselolete suspect message from %d"%(sender))
                 return
-            self.suspect()
+            if self.view_changing == True:
+                return
+            self.view = view
+            self.view_change_init()
+            self.broadcast(pickle.dumps(msg))
+            # 非新视图中同步组的节点已经完成视图变更任务
+            if self.id not in self.get_sync_group(self.view + 1):
+                self.view += 1
+                self.view_changing = False
+                self.replicate_ok = True
+                return
+            self.view_change()
         elif msg_type == MsgType.VIEW_CHANGE:
             if self.verify_msg(msg) != True:
                 print("Invalid view change message from %d"%(sender))
@@ -266,11 +298,11 @@ class Replica():
                 return
             self.vc_received.add(sender)
             self.vcset.append(msg)
-            if len(self.vcset) >= int((replica_amount + 1) / 2):
+            if len(self.vcset) == int((replica_amount + 1) / 2):
                 vc_final_msg = [MsgType.VC_FINAL, self.view, self.id, self.vcset]
                 vc_final_msg.append(self.sign(vc_final_msg))
                 packed_vc_final_msg = pickle.dumps(vc_final_msg)
-                self.broadcast(packed_vc_final_msg, self.get_sync_group(self.view))
+                self.broadcast(packed_vc_final_msg, self.get_sync_group_address(self.view))
                 # 将自身加入已收到的vc_final消息的集合中
                 self.vf_received.add(self.id)
                 # todo:start timer
@@ -312,13 +344,13 @@ class Replica():
                     if new_commit_log[i] == None:
                         print("log loss")
                         continue
-                    self.execute(new_commit_log[0])
+                    self.execute(new_commit_log[i][0])
                 self.replicate_ok = True
                 new_view_msg = [MsgType.NEW_VIEW, self.sn, self.view]
                 new_view_msg.append(self.sign(new_view_msg))
                 if self.id != self.primary:
                     packed_new_view_msg = pickle.dumps(new_view_msg)
-                    self.sk.send(packed_new_view_msg, addresses[self.primary])
+                    self.sk.sendto(packed_new_view_msg, addresses[self.primary])
                     self.view_changing = False
         elif msg_type == MsgType.NEW_VIEW:
             if self.verify_msg(msg) != True:
@@ -330,7 +362,7 @@ class Replica():
                 print("repeated new view message from %d"%(sender))
                 return
             self.new_view_received.add(sender)
-            if len(self.view_changing) >= int((replica_amount - 1) / 2):
+            if len(self.new_view_received) >= int((replica_amount - 1) / 2):
                 self.view_changing = False
 
     def run(self):
@@ -355,7 +387,29 @@ if len(sys.argv) < 2:
     exit(1)
 replica_num = int(sys.argv[1])
 replica = Replica(replica_num)
-replica.run()
+_thread.start_new_thread(replica.run, ())
+while True:
+    try:
+        cmd = input(">>> ")
+    except:
+        exit(0)
+    if cmd == "ls":
+        print("view", replica.view)
+        print("id", replica.id)
+        print("view-changing:", replica.view_changing)
+        print("replicate_ok", replica.replicate_ok)
+        print("state", replica.data)
+        print("primary", replica.primary)
+        print("followr", replica.follower)
+        print("log", replica.format_commit_log())
+    elif cmd == "vc":
+        replica.suspect()
+    elif cmd == "":
+        pass
+    else:
+        print("unknown cmd", cmd)
+
+
 
 
             
