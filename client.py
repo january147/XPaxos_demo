@@ -52,9 +52,14 @@ def digest(data):
         return pickle.dumps(data)
 
 def sign(data):
-    return signature
+    return (self_id, signature)
 
-def verify(msg, sig, id):
+def verify_msg(msg, id = -1):
+    msg_body = msg[:-1]
+    if id == -1:
+        id, sig = msg[-1]
+    else:
+        sig = msg[-1][1]
     if sig == signatures[id]:
         return True
     else:
@@ -72,7 +77,7 @@ def verify_reply(reply):
     msg_f_body = msg_f[:-1]
     d_req_f, sn_f, view_f, ts_f, d_rep_f, sig_f = msg_f[1:]
     msg_f_sig = msg_f[-1]
-    if not (verify(p_reply_body, sig_p, primary) and verify(msg_f_body, sig_f, follower)):
+    if not (verify_msg(p_reply, primary) and verify_msg(msg_f, follower)):
         logger.debug("signature invalid")
         return REPLY_ERROR
 
@@ -84,7 +89,8 @@ def verify_reply(reply):
 
 def request(sk:socket.socket, op):
     # req = [REPLICATE, op, ts, c]
-    req = [MsgType.REPLICATE, pack_op(op), 0, self_id]
+    global timestamp
+    req = [MsgType.REPLICATE, pack_op(op), timestamp, self_id]
     req.append(sign(req))
     sk.sendto(pickle.dumps(req), addresses[1])
     sk.settimeout(tmot)
@@ -95,6 +101,7 @@ def request(sk:socket.socket, op):
             result = verify_reply(msg)
             if result == REPLY_OK:
                 print("ok")
+                timestamp += 1
                 return True
             elif result == REPLY_ERROR:
                 raise RuntimeError("ERROR REPLY")
