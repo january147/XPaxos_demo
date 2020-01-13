@@ -136,7 +136,7 @@ class Replica():
                 return
             i += 0.1
             time.sleep(0.1)
-        print("view change to %d timeout, start new view change"%(self.view))
+        print("view change to view %d timeout, start new view change"%(self.view))
         self.suspect()
 
     def follower_reply_timer(self, sn, ts):
@@ -545,24 +545,31 @@ while True:
     except:
         exit(0)
     if cmd == "ls":
-        print("View", replica.view)
-        print("ID", replica.id)
-        print("Data", replica.data)
-        print("Primary", replica.primary)
-        print("Followr", replica.follower)
-        print("Vc_received", replica.vc_received)
-        print("Vf_received", replica.vf_received)
+        print("View:", replica.view)
+        print("ID:", replica.id)
+        print("Data:", replica.data)
+        print("Primary:", replica.primary)
+        print("Followr:", replica.follower)
+        print("Vc_received:", replica.vc_received)
+        print("Vf_received:", replica.vf_received)
         print("View-changing:", replica.view_changing)
-        print("Replicate_ok", replica.replicate_ok)
-        print("Log\n", replica.format_commit_log())
+        print("Replicate_ok:", replica.replicate_ok)
+        print("############Log##############")
+        print(replica.format_commit_log())
     elif cmd == "vc":
         replica.suspect()
+    elif cmd == "ls nornaml":
+        print("View:", replica.view)
+        print("ID:", replica.id)
+        print("Data:", replica.data)
+        print("Primary:", replica.primary)
+        print("Followr:", replica.follower)
     elif cmd == "ls vc":
-        print("View", replica.view)
-        print("Vc_received", replica.vc_received)
-        print("Vf_received", replica.vf_received)
+        print("View:", replica.view)
+        print("Vc_received:", replica.vc_received)
+        print("Vf_received:", replica.vf_received)
         print("View-changing:", replica.view_changing)
-        print("Replicate_ok", replica.replicate_ok)
+        print("Replicate_ok:", replica.replicate_ok)
     elif cmd.startswith("set data"):
         try:
             replica.data = int(cmd.split(" ")[-1])
