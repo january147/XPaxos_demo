@@ -130,6 +130,7 @@ class Client():
                 return
             i += 0.01
             time.sleep(0.01)
+        self.request_complete = True
         print("req %s timeout"%(str(req)))
 
     def request(self, op):
@@ -146,7 +147,6 @@ class Client():
     
     def msg_handler(self, msg, sender):
         msg_type = msg[0]
-        print(msg)
         if msg_type == MsgType.REPLY:
             self.verify_reply(msg)
         elif msg_type == MsgType.NEW_VIEW:

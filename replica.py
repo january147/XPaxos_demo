@@ -335,6 +335,8 @@ class Replica():
                         except Exception as e:
                             print("error reply to client")
                             print("ERROR %s"%(str(e)))
+                    else:
+                        print("follower reply doesn't match primary reply")
                         
         elif msg_type == MsgType.SUSPECT:
             self.lock.acquire()
